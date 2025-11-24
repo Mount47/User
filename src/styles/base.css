@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
+
+:root {
+  font-family: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: #0f172a;
+  background-color: #edf2fb;
+  --surface-glass: rgba(255, 255, 255, 0.85);
+  --surface-card: rgba(255, 255, 255, 0.95);
+  --border-soft: rgba(15, 23, 42, 0.08);
+  --text-muted: #6b7280;
+  --accent-cyan: #67e8f9;
+  --accent-purple: #a5b4fc;
+  --accent-coral: #fb7185;
+}
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  background: radial-gradient(circle at 15% 20%, rgba(165, 180, 252, 0.35), transparent 40%),
+    radial-gradient(circle at 80% 0%, rgba(252, 165, 165, 0.25), transparent 40%),
+    #edf2fb;
+  color: #0f172a;
+  line-height: 1.5;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button {
+  font: inherit;
+}
+
+#app {
+  min-height: 100vh;
+}
