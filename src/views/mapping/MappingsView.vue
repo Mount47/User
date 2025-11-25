@@ -24,7 +24,14 @@ const palette = ['#8b5cf6', '#0ea5e9', '#f472b6', '#f59e0b', '#10b981', '#14b8a6
 
 const entityStore = useEntityStore()
 const { lastSyncedAt } = useCareData()
-const mappingSource = computed(() => (entityStore.mappings.length ? entityStore.mappings : []))
+const mappingSource = computed(() => {
+  debugLog('MappingsView', 'mappings数据状态', { 
+    mappingsCount: entityStore.mappings.length,
+    devicesCount: entityStore.devices.length,
+    loading: entityStore.loading
+  })
+  return entityStore.mappings.length ? entityStore.mappings : []
+})
 const searchTerm = ref('')
 const statusFilter = ref<StatusFilter>('ALL')
 const page = ref(1)
@@ -64,45 +71,57 @@ function formatLastUpdated(value?: string): string {
 const mappingRows = computed<MappingRow[]>(() => {
   const rows: MappingRow[] = []
   let colorIndex = 0
-  const data = mappingSource.value.length ? mappingSource.value : entityStore.devices
-  data.forEach((mapping) => {
-    const paletteValue = palette[colorIndex % palette.length]
-    const accent = paletteValue ?? '#8b5cf6'
-    if ('mappingId' in mapping) {
+  
+  // 优先使用映射数据，如果没有映射数据则从设备数据构建默认行
+  const mappings = mappingSource.value
+  const devices = entityStore.devices
+  
+  debugLog('MappingsView', '构建表格行', { mappingsCount: mappings.length, devicesCount: devices.length })
+  
+  if (mappings.length > 0) {
+    // 处理真实的映射数据
+    mappings.forEach((mapping: any) => {
+      const paletteValue = palette[colorIndex % palette.length]
+      const accent = paletteValue ?? '#8b5cf6'
+      
       rows.push({
-        id: mapping.mappingId,
-        userId: mapping.personId || '未登记',
-        userName: mapping.personName || '未分配',
-        deviceType: mapping.modelType || '未知型号',
-        deviceId: mapping.deviceId,
-        deviceName: mapping.deviceName || '未知设备',
-        mappingName: `${mapping.deviceName || mapping.deviceId}-${mapping.personName || 'Mapping'}`,
-        state: mapping.status,
-        lastUpdated: formatLastUpdated(mapping.updatedAt || mapping.createdAt || lastSyncedAt.value || ''),
+        id: String(mapping.id || `mapping-${colorIndex}`),
+        userId: String(mapping.personId || '未登记'),
+        userName: mapping.personName || mapping.person?.personName || '未分配',
+        deviceType: mapping.device?.modelType || '未知型号',
+        deviceId: String(mapping.deviceId || mapping.device?.deviceId || '未知设备'),
+        deviceName: mapping.deviceName || mapping.device?.deviceName || '未知设备',
+        mappingName: `${mapping.deviceName || mapping.device?.deviceName || mapping.deviceId}-${mapping.personName || 'Mapping'}`,
+        state: (mapping.device?.status || 'OFFLINE') as DeviceStatus,
+        lastUpdated: formatLastUpdated(mapping.device?.updatedAt || mapping.device?.createdAt || lastSyncedAt.value || ''),
         accent
       })
       colorIndex += 1
-    } else {
-      const device = mapping
-      const persons = device.persons?.length ? device.persons : [{ personId: 'NA', personName: '未绑定设备' }]
-      persons.forEach((person, personIdx) => {
-        const color = palette[(colorIndex + personIdx) % palette.length]
-        rows.push({
-          id: `${device.deviceId}-${person.personId || personIdx}`,
-          userId: person.personId || '未登记',
-          userName: person.personName || '未分配',
-          deviceType: device.modelType,
-          deviceId: device.deviceId,
-          deviceName: device.deviceName,
-          mappingName: `${device.deviceName}-${person.personName || 'Mapping'}`,
-          state: device.status,
-          lastUpdated: formatLastUpdated(device.lastHeartbeat || lastSyncedAt.value || ''),
-          accent: color ?? '#8b5cf6'
-        })
+    })
+  } else if (devices.length > 0) {
+    // 如果没有映射数据，从设备数据构建基础行
+    devices.forEach((device: any) => {
+      const paletteValue = palette[colorIndex % palette.length]
+      
+      // 为每个设备创建一个默认的映射行
+      const color = palette[colorIndex % palette.length]
+      rows.push({
+        id: `device-${device.deviceId || device.id}-default`,
+        userId: '未登记',
+        userName: '未分配',
+        deviceType: device.modelType || '未知型号',
+        deviceId: String(device.deviceId || device.id || '未知设备'),
+        deviceName: device.deviceName || '未知设备',
+        mappingName: `${device.deviceName || device.deviceId}-未绑定`,
+        state: (device.status || 'OFFLINE') as DeviceStatus,
+        lastUpdated: formatLastUpdated(device.updatedAt || lastSyncedAt.value || ''),
+        accent: color ?? '#8b5cf6'
       })
       colorIndex += 1
-    }
-  })
+    })
+  }
+  
+  debugLog('MappingsView', '构建的表格行数据', { rowCount: rows.length, rows: rows.slice(0, 3) })
   return rows
 })
 

@@ -5,7 +5,6 @@ import { useEntityStore } from '@/store'
 import type { CaregiverDevice } from '@/types'
 import {
   DEVICE_MODEL_TYPE_MAP,
-  DEVICE_TYPE_TAG_COLOR,
   getDeviceMonitorType,
   getDeviceStatusText,
   getDeviceStatusTone,
@@ -60,7 +59,7 @@ const rangeSummary = computed(() => {
   if (!pagination.total) return '暂无数据'
   const start = (pagination.page - 1) * pagination.size + 1
   const end = Math.min(pagination.page * pagination.size, pagination.total)
-  return 
+  return `显示 ${start}-${end} 条，共 ${pagination.total} 条记录`
 })
 
 const normalizeStatus = (value?: string): DeviceStatusKey => {
@@ -70,6 +69,10 @@ const normalizeStatus = (value?: string): DeviceStatusKey => {
 
 const normalizeListResponse = (payload: any) => {
   if (!payload) return { items: [], total: 0, pageIndex: 0, zeroBased: true }
+  
+  // 记录原始响应以便调试
+  debugLog('DevicesView', '原始API响应', payload)
+  
   const meta = payload.meta || payload.pagination || {}
   const pageIndex =
     typeof meta.currentPage === 'number'
@@ -80,47 +83,48 @@ const normalizeListResponse = (payload: any) => {
           ? payload.page
           : 0
   const zeroBased = !!(meta.currentPage === undefined && (meta.page !== undefined || payload.page !== undefined))
+  
+  // 处理各种可能的响应格式
+  let items = []
+  let total = 0
+  
   if (Array.isArray(payload.records)) {
-    return {
-      items: payload.records,
-      total: meta.totalItems ?? meta.total ?? payload.total ?? payload.records.length,
-      pageIndex,
-      zeroBased
+    items = payload.records
+    total = meta.totalItems ?? meta.total ?? payload.total ?? payload.records.length
+  } else if (Array.isArray(payload.data)) {
+    items = payload.data
+    total = meta.totalItems ?? meta.total ?? payload.total ?? payload.data.length
+  } else if (Array.isArray(payload.items)) {
+    items = payload.items
+    total = meta.totalItems ?? meta.total ?? payload.total ?? payload.items.length
+  } else if (Array.isArray(payload.list)) {
+    items = payload.list
+    total = meta.totalItems ?? meta.total ?? payload.total ?? payload.list.length
+  } else if (Array.isArray(payload)) {
+    items = payload
+    total = payload.length
+  } else {
+    // 尝试从响应中提取任何数组字段
+    const arrayFields = Object.keys(payload).filter(key => Array.isArray(payload[key]))
+    if (arrayFields.length > 0) {
+      const firstArrayField = arrayFields[0]!
+      items = payload[firstArrayField]
+      total = payload.total ?? items.length
+      debugLog('DevicesView', `使用字段 ${firstArrayField} 作为数据源`, { items, total })
+    } else {
+      items = []
+      total = meta.totalItems ?? meta.total ?? payload.total ?? 0
     }
   }
-  if (Array.isArray(payload.data)) {
-    return {
-      items: payload.data,
-      total: meta.totalItems ?? meta.total ?? payload.total ?? payload.data.length,
-      pageIndex,
-      zeroBased
-    }
-  }
-  if (Array.isArray(payload.items)) {
-    return {
-      items: payload.items,
-      total: meta.totalItems ?? meta.total ?? payload.total ?? payload.items.length,
-      pageIndex,
-      zeroBased
-    }
-  }
-  if (Array.isArray(payload.list)) {
-    return {
-      items: payload.list,
-      total: meta.totalItems ?? meta.total ?? payload.total ?? payload.list.length,
-      pageIndex,
-      zeroBased
-    }
-  }
-  if (Array.isArray(payload)) {
-    return { items: payload, total: payload.length, pageIndex: 0, zeroBased: true }
-  }
-  return { items: [], total: meta.totalItems ?? meta.total ?? payload.total ?? 0, pageIndex: 0, zeroBased: true }
+  
+  const result = { items, total, pageIndex, zeroBased }
+  debugLog('DevicesView', '解析后的响应数据', result)
+  return result
 }
 
 const updateStats = () => {
   const counts = { ONLINE: 0, OFFLINE: 0, MAINTENANCE: 0 }
-  rows.value.forEach((item) => {
+  rows.value.forEach((item: any) => {
     const key = normalizeStatus(item.status)
     counts[key] += 1
   })
@@ -201,7 +205,7 @@ const toggleAllSelection = (event: Event) => {
     selection.value.clear()
     return
   }
-  const ids = rows.value.map((item) => item.deviceId)
+  const ids = rows.value.map((item: any) => item.deviceId)
   selection.value = new Set(ids)
 }
 
@@ -239,7 +243,7 @@ const validateForm = () => {
     formError.value = '设备 ID 不能为空'
     return false
   }
-  if (formMode.value === 'create' && rows.value.some((item) => item.deviceId === formData.deviceId.trim())) {
+  if (formMode.value === 'create' && rows.value.some((item: any) => item.deviceId === formData.deviceId.trim())) {
     formError.value = '设备 ID 已存在'
     return false
   }
@@ -316,7 +320,7 @@ const handleBatchDelete = async () => {
     for (const id of ids) {
       await deviceApi.remove(id)
     }
-    setFeedback('success', )
+    setFeedback('success', `已删除 ${selectedCount.value} 个设备`)
     await loadDevices()
     entityStore.fetchDevices(true).catch(() => {})
   } catch (error: any) {
@@ -337,6 +341,21 @@ const openBatchStatusDialog = () => {
   }
   batchStatus.value = 'OFFLINE'
   showBatchStatus.value = true
+}
+
+const getMonitorTypeTagClass = (device: CaregiverDevice) => {
+  const monitorType = getDeviceMonitorType(device)
+  const colorMap: Record<string, string> = {
+    '人体位姿': 'success',
+    '姿态监测': 'success', 
+    '位姿监测': 'success',
+    '呼吸心跳': 'warning',
+    '人员检测': 'warning',
+    '生命体征': 'danger',
+    '心电': 'danger',
+    '心电监测': 'danger'
+  }
+  return colorMap[monitorType] || 'info'
 }
 
 const confirmBatchStatus = async () => {
@@ -479,7 +498,7 @@ watch(
             </td>
             <td>{{ getDeviceModelText(device) }}</td>
             <td>
-              <span class="tag" :class="DEVICE_TYPE_TAG_COLOR[getDeviceMonitorType(device)] || 'info'">
+              <span class="tag" :class="getMonitorTypeTagClass(device)">
                 {{ getDeviceMonitorType(device) }}
               </span>
             </td>
