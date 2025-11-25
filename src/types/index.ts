@@ -36,6 +36,35 @@ export interface PersonProfile {
   updatedAt?: ISODateString
 }
 
+/** 护理人员设备信息 */
+export interface CaregiverPersonDevice {
+  deviceId: string
+  deviceName: string
+  modelType?: string
+}
+
+/** 生命体征概览 */
+export interface LatestOverview {
+  heartRate?: number
+  breathRate?: number
+  motion?: number
+  posture?: string
+  collectedAt?: ISODateString
+}
+
+/** 护理系统人员信息 */
+export interface CaregiverPerson {
+  personId: string
+  personName: string
+  age?: number
+  gender: 'M' | 'F'
+  department?: string
+  tags?: string[]
+  devices: CaregiverPersonDevice[]
+  latestOverview?: LatestOverview
+  lastAlertAt?: ISODateString
+}
+
 // ==================== 设备模块 ====================
 
 /** 设备状态枚举，兼容原始英文和值映射 */

@@ -10,17 +10,21 @@ export const STORAGE_KEYS = {
 export const API_BASE_URL =
   typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL
     ? import.meta.env.VITE_API_BASE_URL
-    : ''
+    : 'http://localhost:8080'
 
 export const WS_BASE_URL =
   typeof import.meta !== 'undefined' && import.meta.env?.VITE_WS_BASE_URL
     ? import.meta.env.VITE_WS_BASE_URL
     : (() => {
         if (typeof window === 'undefined') {
-          return 'ws://localhost:5173'
+          return 'ws://localhost:8080'
         }
+        // 在生产环境中使用当前域名，但端口改为后端端口
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        return `${protocol}//${window.location.host}`
+        const hostname = window.location.hostname
+        // 开发环境默认使用8080端口，生产环境可以通过环境变量配置
+        const port = hostname === 'localhost' || hostname === '127.0.0.1' ? '8080' : window.location.port
+        return `${protocol}//${hostname}:${port}`
       })()
 
 export const ALERT_LEVELS = {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { deviceApi } from '@/api'
 import { useEntityStore } from '@/store'
 import type { CaregiverDevice } from '@/types'
@@ -49,6 +49,34 @@ const statusOptions = [
 ]
 
 const modelTypeOptions = Array.from(new Set(Object.keys(DEVICE_MODEL_TYPE_MAP)))
+
+// 下拉框状态
+const modelTypeDropdownOpen = ref(false)
+const statusDropdownOpen = ref(false)
+
+// 下拉框选择方法
+function selectModelType(value: string) {
+  filters.modelType = value
+  modelTypeDropdownOpen.value = false
+}
+
+function selectStatus(value: string) {
+  filters.status = value
+  statusDropdownOpen.value = false
+}
+
+// 点击外部关闭下拉框
+function closeDropdowns() {
+  modelTypeDropdownOpen.value = false
+  statusDropdownOpen.value = false
+}
+
+function handleClickOutside(event: Event) {
+  const target = event.target as HTMLElement
+  if (!target.closest('.custom-select')) {
+    closeDropdowns()
+  }
+}
 
 const selectedCount = computed(() => selection.value.size)
 const allSelected = computed(
@@ -381,6 +409,11 @@ const confirmBatchStatus = async () => {
 
 onMounted(() => {
   loadDevices()
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 
 watch(
@@ -425,17 +458,66 @@ watch(
       </div>
       <div class="field">
         <label>型号类型</label>
-        <select v-model="filters.modelType">
-          <option value="">全部</option>
-          <option v-for="item in modelTypeOptions" :key="item" :value="item">{{ item }}</option>
-        </select>
+        <div class="custom-select" :class="{ open: modelTypeDropdownOpen }">
+          <div class="select-trigger" @click="modelTypeDropdownOpen = !modelTypeDropdownOpen">
+            <span class="select-value">
+              {{ filters.modelType || '全部' }}
+            </span>
+            <svg class="select-arrow" viewBox="0 0 24 24">
+              <path d="M7 10l5 5 5-5z" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="select-dropdown" v-show="modelTypeDropdownOpen">
+            <div 
+              class="select-option" 
+              :class="{ active: !filters.modelType }"
+              @click="selectModelType('')"
+            >
+              全部
+            </div>
+            <div 
+              v-for="item in modelTypeOptions" 
+              :key="item" 
+              class="select-option"
+              :class="{ active: filters.modelType === item }"
+              @click="selectModelType(item)"
+            >
+              📡 {{ item }}
+            </div>
+          </div>
+        </div>
       </div>
       <div class="field">
         <label>状态</label>
-        <select v-model="filters.status">
-          <option value="">全部</option>
-          <option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
+        <div class="custom-select" :class="{ open: statusDropdownOpen }">
+          <div class="select-trigger" @click="statusDropdownOpen = !statusDropdownOpen">
+            <span class="select-value">
+              {{ filters.status ? statusOptions.find(opt => opt.value === filters.status)?.label : '全部' }}
+            </span>
+            <svg class="select-arrow" viewBox="0 0 24 24">
+              <path d="M7 10l5 5 5-5z" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="select-dropdown" v-show="statusDropdownOpen">
+            <div 
+              class="select-option" 
+              :class="{ active: !filters.status }"
+              @click="selectStatus('')"
+            >
+              全部
+            </div>
+            <div 
+              v-for="item in statusOptions" 
+              :key="item.value" 
+              class="select-option"
+              :class="{ active: filters.status === item.value }"
+              @click="selectStatus(item.value)"
+            >
+              <span class="status-dot" :class="item.value.toLowerCase()"></span>
+              {{ item.label }}
+            </div>
+          </div>
+        </div>
       </div>
       <div class="actions">
         <button type="button" class="primary" @click="handleSearch">搜索</button>
@@ -936,5 +1018,140 @@ button:disabled {
   .counter {
     justify-content: flex-start;
   }
+}
+
+/* 自定义下拉选择器样式 */
+.custom-select {
+  position: relative;
+  min-width: 140px;
+}
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: white;
+  border: 2px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.8);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+}
+
+.select-trigger:hover {
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+  transform: translateY(-1px);
+}
+
+.custom-select.open .select-trigger {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.select-value {
+  flex: 1;
+  text-align: left;
+}
+
+.select-arrow {
+  width: 20px;
+  height: 20px;
+  color: rgba(15, 23, 42, 0.5);
+  transition: transform 0.3s ease;
+  margin-left: 0.5rem;
+}
+
+.custom-select.open .select-arrow {
+  transform: rotate(180deg);
+  color: #3b82f6;
+}
+
+.select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: white;
+  border: 2px solid rgba(59, 130, 246, 0.2);
+  border-radius: 12px;
+  margin-top: 0.25rem;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.15);
+  animation: dropdownSlide 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+@keyframes dropdownSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.select-option {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.875rem;
+  color: rgba(15, 23, 42, 0.8);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.select-option:last-child {
+  border-bottom: none;
+}
+
+.select-option:hover {
+  background: linear-gradient(45deg, rgba(59, 130, 246, 0.08), rgba(147, 51, 234, 0.08));
+  color: #3b82f6;
+  transform: translateX(4px);
+}
+
+.select-option.active {
+  background: linear-gradient(45deg, rgba(59, 130, 246, 0.12), rgba(147, 51, 234, 0.12));
+  color: #3b82f6;
+  font-weight: 600;
+  position: relative;
+}
+
+.select-option.active::after {
+  content: '✓';
+  position: absolute;
+  right: 1rem;
+  color: #3b82f6;
+  font-weight: bold;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.online {
+  background: #10b981;
+}
+
+.status-dot.offline {
+  background: #ef4444;
+}
+
+.status-dot.maintenance {
+  background: #f59e0b;
 }
 </style>
