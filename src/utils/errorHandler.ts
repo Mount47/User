@@ -1,64 +1,40 @@
-import type { AxiosError } from 'axios'
-import { logger } from './logger'
-
-export interface ErrorPayload {
+export type NormalizedError = {
+  status?: number
   message: string
-  status?: number
-  code?: string | number
-  details?: unknown
+  code?: string
+  details?: any
 }
 
-export class ApiError extends Error {
-  status?: number
-  code?: string | number
-  details?: unknown
-
-  constructor(payload: ErrorPayload) {
-    super(payload.message)
-    this.status = payload.status
-    this.code = payload.code
-    this.details = payload.details
-  }
+const DEFAULT_ERROR: NormalizedError = {
+  message: '系统出现错误，请稍后重试'
 }
 
-export const normalizeError = (error: unknown): ApiError => {
-  if (error instanceof ApiError) {
-    return error
+export function normalizeError(error: any): NormalizedError {
+  if (!error) return { ...DEFAULT_ERROR }
+
+  if (typeof error === 'string') {
+    return { message: error }
   }
 
-  if (isAxiosError(error)) {
-    const { response, request, message } = error
-    const payload: ErrorPayload = {
-      message:
-        response?.data?.message ||
-        response?.data?.error ||
-        response?.statusText ||
-        message ||
-        '网络请求失败',
-      status: response?.status,
-      code: response?.data?.code
+  if (error?.isAxiosError && error.response) {
+    const status = error.response.status
+    const data = error.response.data
+    return {
+      status,
+      message: data?.message || data?.error || error.message || DEFAULT_ERROR.message,
+      code: data?.code,
+      details: data
     }
-    if (response?.data) {
-      payload.details = response.data
-    } else if (request) {
-      payload.details = { request }
-    }
-    const normalized = new ApiError(payload)
-    logger.error('API error captured', normalized)
-    return normalized
   }
 
   if (error instanceof Error) {
-    logger.error('Unexpected runtime error', error)
-    return new ApiError({ message: error.message })
+    return { message: error.message }
   }
 
-  logger.error('Unknown error type', error)
-  return new ApiError({ message: '未知错误' })
+  return {
+    status: error?.status,
+    message: error?.message || DEFAULT_ERROR.message,
+    code: error?.code,
+    details: error
+  }
 }
-
-export const handleApiError = (error: unknown): never => {
-  throw normalizeError(error)
-}
-
-const isAxiosError = (error: any): error is AxiosError => !!error?.isAxiosError

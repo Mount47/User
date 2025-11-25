@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useCareData } from '@/composables/useCareData'
+import { debugLog } from '@/utils/debugLog'
 
 const { entityStore, alerts, hydrateScope, refreshAlerts } = useCareData()
 
@@ -24,6 +25,15 @@ watch(
     if (next === prev) return
     await refreshAlerts(next)
   }
+)
+
+watch(
+  () => people.value,
+  (next) => {
+    debugLog('PeopleView', '接收到人员数据', next)
+    debugLog('PeopleView', '数据接收状态', Array.isArray(next) && next.length ? '成功' : '空数据')
+  },
+  { immediate: true }
 )
 
 const departments = computed(() => {

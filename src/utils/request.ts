@@ -9,6 +9,7 @@ import {
 } from './auth'
 import { normalizeError } from './errorHandler'
 import { logger } from './logger'
+import { debugLog } from './debugLog'
 
 export interface RequestContext extends AxiosInstance {}
 
@@ -27,13 +28,22 @@ const createService = (): RequestContext => {
         Authorization: config.headers?.Authorization ?? `Bearer ${token}`
       }
     }
+    debugLog(
+      'API',
+      `REQUEST ${String(config.method || 'GET').toUpperCase()} ${config.url}`,
+      config.method?.toLowerCase() === 'get' ? config.params : config.data
+    )
     return config
   })
 
   service.interceptors.response.use(
-    (response: AxiosResponse) => response.data ?? response,
+    (response: AxiosResponse) => {
+      debugLog('API', `RESPONSE ${response.config.url} ${response.status}`, response.data)
+      return response.data ?? response
+    },
     async (error) => {
       const normalized = normalizeError(error)
+      debugLog('API', `ERROR ${error.config?.url || ''}`, normalized)
 
       if (normalized.status === 401) {
         logger.warn('Received 401, clearing auth storage')

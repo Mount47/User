@@ -26,6 +26,14 @@ export const deviceApi = {
 
   remove(deviceId) {
     return http.delete(`/api/radar/devices/${deviceId}`)
+  },
+
+  updateStatus(deviceId, status) {
+    return http.put(`/api/radar/devices/${deviceId}/status`, { status })
+  },
+
+  batchUpdateStatus(payload) {
+    return http.put('/api/radar/devices/status/batch', payload)
   }
 }
 

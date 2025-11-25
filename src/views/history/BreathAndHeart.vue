@@ -1,15 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useCareData } from '@/composables/useCareData'
+import { debugLog } from '@/utils/debugLog'
 
-const {
-  entityStore,
-  histories,
-  detectionSummaries,
-  hydrateScope,
-  fetchHistory,
-  refreshDetections
-} = useCareData()
+const { entityStore, histories, hydrateScope, fetchHistory } = useCareData()
 
 const ranges = [6, 12, 24, 48]
 const historyRangeHours = ref(24)
@@ -119,16 +113,6 @@ const donutSegments = computed(() => {
   })
 })
 
-const postureHistory = computed(() => {
-  const personId = selectedPerson.value?.personId
-  if (!personId) return []
-  return detectionSummaries.value
-    .filter((item) => item.personId === personId && item.detectionType === 'POSTURE')
-    .sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
-})
-
-const timelineEvents = computed(() => postureHistory.value.slice(-5).reverse())
-
 const chartPath = computed(() => {
   if (!bucketRows.value.length) return ''
   const values = bucketRows.value.map((row) => row.heartRateAvg)
@@ -169,10 +153,15 @@ onMounted(async () => {
   if (entityStore.selectedPersonId) {
     await fetchHistory(entityStore.selectedPersonId)
   }
-  if (!detectionSummaries.value.length) {
-    await refreshDetections()
-  }
 })
+
+watch(
+  () => bucketRows.value,
+  (next) => {
+    debugLog('History-Breath', '历史波形数据更新', { count: next.length })
+  },
+  { immediate: true }
+)
 
 watch(
   () => entityStore.selectedPersonId,
@@ -189,18 +178,24 @@ watch(
       <div>
         <p class="eyebrow">Historical Statistic</p>
         <h1>历史生命体征分析</h1>
-        <p class="muted">选择时间范围可回放心率、呼吸与姿态异常。</p>
+        <p class="muted">选择时间范围可回放心率、呼吸趋势。</p>
       </div>
       <div class="chips">
-        <button
-          v-for="item in ranges"
-          :key="item"
-          type="button"
-          :class="{ active: historyRangeHours === item }"
-          @click="setHistoryRange(item)"
-        >
-          {{ item }}h
-        </button>
+        <div class="tab-bar">
+          <RouterLink class="tab" to="/history/breath-heart" active-class="active">呼吸 / 心率</RouterLink>
+          <RouterLink class="tab" to="/history/posture" active-class="active">姿态分析</RouterLink>
+        </div>
+        <div class="range-buttons">
+          <button
+            v-for="item in ranges"
+            :key="item"
+            type="button"
+            :class="{ active: historyRangeHours === item }"
+            @click="setHistoryRange(item)"
+          >
+            {{ item }}h
+          </button>
+        </div>
       </div>
     </header>
 
@@ -328,20 +323,6 @@ watch(
           </div>
         </article>
 
-        <article class="card timeline-card">
-          <header>
-            <p>Posture Timeline</p>
-            <span>最近 {{ timelineEvents.length }} 条</span>
-          </header>
-          <ul>
-            <li v-for="event in timelineEvents" :key="event.detectionId">
-              <strong>{{ event.posture || 'Unknown' }}</strong>
-              <p>{{ event.deviceName || 'Device' }}</p>
-              <small>{{ new Date(event.updatedAt).toLocaleString() }}</small>
-            </li>
-            <li v-if="!timelineEvents.length">等待姿态数据...</li>
-          </ul>
-        </article>
       </div>
     </div>
   </section>
@@ -379,11 +360,38 @@ watch(
 }
 
 .chips {
-  display: inline-flex;
-  gap: 0.4rem;
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
 }
 
-.chips button {
+.tab-bar {
+  display: inline-flex;
+  padding: 0.2rem;
+  background: rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  gap: 0.2rem;
+}
+
+.tab-bar .tab {
+  text-decoration: none;
+  padding: 0.35rem 0.9rem;
+  border-radius: 12px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.tab-bar .active {
+  background: linear-gradient(135deg, #8b5cf6, #22d3ee);
+  color: #fff;
+}
+
+.range-buttons {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.range-buttons button {
   border: 1px solid rgba(15, 23, 42, 0.2);
   background: #fff;
   border-radius: 999px;
@@ -391,7 +399,7 @@ watch(
   cursor: pointer;
 }
 
-.chips button.active {
+.range-buttons button.active {
   background: linear-gradient(135deg, #8b5cf6, #22d3ee);
   border-color: transparent;
   color: #fff;
@@ -569,21 +577,6 @@ td {
   padding: 0.8rem;
   text-align: left;
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-}
-
-.timeline-card ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.timeline-card li {
-  border-radius: 16px;
-  padding: 0.9rem;
-  background: #f9fafb;
 }
 
 .eyebrow {

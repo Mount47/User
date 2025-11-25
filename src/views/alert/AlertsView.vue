@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import type { AlertCategory, AlertStatus } from '@/types'
 import { fallAlertApi } from '@/api/person-alert/alerts'
 import { useCareData } from '@/composables/useCareData'
 import { logger } from '@/utils/logger'
+import { debugLog } from '@/utils/debugLog'
 
 const { alerts, alertFilters, alertStats, setAlertFilter, refreshAlerts, hydrateScope } = useCareData()
 
@@ -31,6 +32,15 @@ onMounted(async () => {
     await hydrateScope()
   }
 })
+
+watch(
+  () => alerts.value,
+  (next) => {
+    debugLog('AlertsView', '接收到告警数据', next)
+    debugLog('AlertsView', '数据接收状态', Array.isArray(next) && next.length ? '成功' : '空数据')
+  },
+  { immediate: true }
+)
 
 const severityStats = computed(() => {
   const summary = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 }
@@ -65,6 +75,7 @@ async function handleScopeChange(value: 'CURRENT' | 'ALL') {
 
 async function handleAction(alertId: number, status: AlertStatus) {
   try {
+    debugLog('AlertsView', '准备更新告警状态', { alertId, status })
     if (status === 'RESOLVED') {
       await fallAlertApi.markResolved(alertId)
     } else if (status === 'ACKED') {
@@ -72,9 +83,11 @@ async function handleAction(alertId: number, status: AlertStatus) {
     } else {
       await fallAlertApi.markPending(alertId)
     }
+    debugLog('AlertsView', '更新告警状态成功', { alertId, status })
     await refreshAlerts()
   } catch (error) {
     logger.warn('Failed to update alert status', error)
+    debugLog('AlertsView', '更新告警状态失败', error)
   }
 }
 </script>

@@ -13,6 +13,7 @@ import { detectionApi } from '@/api/radar-devices/realtime'
 import { deviceStatusApi } from '@/api/radar-devices/deviceStatus'
 import { ti6843VitalApi } from '@/api/radar-devices/ti6843Vital'
 import { logger } from '@/utils/logger'
+import { debugLog } from '@/utils/debugLog'
 
 type AlertFilters = {
   category: AlertCategory | 'ALL'
@@ -56,19 +57,24 @@ async function refreshAlerts(personId?: string | number | null) {
         : personId ?? entityStore.selectedPersonId ?? resolvePersonId(entityStore.selectedPerson)
     if (scopePerson) params.personId = scopePerson
     const response = await fallAlertApi.list(params)
-    alerts.value = ensureArray<CaregiverAlert>(response)
+    const payload = ensureArray<CaregiverAlert>(response)
+    alerts.value = payload
+    debugLog('CareData', '刷新告警完成', { personId, count: payload.length })
   } catch (error) {
     logger.warn('Failed to refresh alerts', error)
     alerts.value = []
+    debugLog('CareData', '刷新告警失败', error)
   }
 }
 
 async function refreshDeviceOverview() {
   try {
     deviceOverview.value = await deviceStatusApi.deviceOverview()
+    debugLog('CareData', '刷新设备概览完成', deviceOverview.value)
   } catch (error) {
     logger.warn('Failed to fetch device overview', error)
     deviceOverview.value = null
+    debugLog('CareData', '刷新设备概览失败', error)
   }
 }
 
@@ -76,9 +82,11 @@ async function refreshDetections() {
   try {
     const response = await detectionApi.statusesWithPerson()
     detectionSummaries.value = ensureArray<DetectionSummary>(response)
+    debugLog('CareData', '刷新检测概要完成', { count: detectionSummaries.value.length })
   } catch (error) {
     logger.warn('Failed to fetch detection summaries', error)
     detectionSummaries.value = []
+    debugLog('CareData', '刷新检测概要失败', error)
   }
 }
 
@@ -99,8 +107,10 @@ async function fetchHistory(personId?: string | number | null, options?: Record<
       ...histories.value,
       [String(target)]: ensureArray<VitalDataPoint>(response)
     }
+    debugLog('CareData', '拉取历史体征完成', { personId: target, count: histories.value[String(target)].length })
   } catch (error) {
     logger.warn('Failed to fetch history data', error)
+    debugLog('CareData', '拉取历史体征失败', error)
   }
 }
 

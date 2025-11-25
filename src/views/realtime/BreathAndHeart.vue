@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useCareData } from '@/composables/useCareData'
+import { wsApi } from '@/api/websocket'
+import type { ManagedWebSocket } from '@/utils/ws'
+import { debugLog } from '@/utils/debugLog'
 
 const {
   entityStore,
@@ -12,8 +15,6 @@ const {
   refreshDetections,
   fetchHistory
 } = useCareData()
-
-const activeTab = ref<'vitals' | 'posture'>('vitals')
 
 const selectedPerson = computed(() => entityStore.selectedPerson)
 const people = computed(() => entityStore.persons)
@@ -66,9 +67,28 @@ const trendDeltas = computed(() => {
   }
 })
 
+// 最新一条来自 WebSocket 的体征数据
+const liveVitals = ref<any | null>(null)
+
 const activeRealtime = computed(() => {
   const personId = selectedPerson.value?.personId || selectedPerson.value?.id
   if (!personId) return null
+  // Prefer live websocket data if available; fall back to last summary
+  if (liveVitals.value) {
+    const base = detectionSummaries.value.find(
+      (item) => item.personId === personId && item.detectionType === 'VITAL'
+    )
+    return {
+      ...base,
+      detectionType: 'VITAL',
+      deviceId: base?.deviceId || activeDevice.value?.deviceId,
+      deviceName: base?.deviceName || activeDevice.value?.deviceName,
+      personId,
+      heartRate: liveVitals.value.heartRate,
+      breathRate: liveVitals.value.breathRate,
+      updatedAt: liveVitals.value.timestamp
+    }
+  }
   return detectionSummaries.value.find(
     (item) => item.personId === personId && item.detectionType === 'VITAL'
   )
@@ -119,14 +139,6 @@ const activeDevice = computed(() => {
   )
 })
 
-const postureDetection = computed(() => {
-  const personId = selectedPerson.value?.personId
-  if (!personId) return null
-  return detectionSummaries.value.find(
-    (item) => item.personId === personId && item.detectionType === 'POSTURE'
-  )
-})
-
 function formatDate(value?: string) {
   if (!value) return '暂无'
   const date = new Date(value)
@@ -158,12 +170,77 @@ watch(
   }
 )
 
+watch(
+  () => historySlice.value,
+  (next) => {
+    debugLog('Realtime-Breath', '波形数据更新', { count: next.length })
+  }
+)
+
 function onSelectChange(event: Event) {
   const target = event.target as HTMLSelectElement
   entityStore.setSelectedPerson(target.value)
 }
+
+// --- Realtime: ti6843 vital websocket wiring ---
+let vitalSocket: ManagedWebSocket | null = null
+
+function closeVitalSocket() {
+  try {
+    vitalSocket?.close()
+  } finally {
+    vitalSocket = null
+  }
+}
+
+function connectVitalSocket() {
+  closeVitalSocket()
+  const deviceId = activeDevice.value?.deviceId
+  if (!deviceId) return
+  vitalSocket = wsApi.ti6843Vital(deviceId, {
+    onMessage: (payload) => {
+      // Expected payload example from docs/websockets.md:
+      // { deviceId, time, breathRate, heartRate, timestamp }
+      const p: any = payload || {}
+      const heartRate = Number(p.heartRate ?? p.hr ?? 0)
+      const breathRate = Number(p.breathRate ?? p.br ?? 0)
+      const timestamp = String(p.timestamp ?? new Date().toISOString())
+
+      liveVitals.value = {
+        deviceId,
+        heartRate,
+        breathRate,
+        timestamp
+      }
+      debugLog('Realtime-Breath', 'WS 推送', liveVitals.value)
+
+      const key = String(
+        entityStore.selectedPersonId || selectedPerson.value?.personId || selectedPerson.value?.id || ''
+      )
+      if (!key) return
+      const series = histories.value[key] ? [...histories.value[key]] : []
+      series.push({ timestamp, heartRate, breathRate, motion: 0 })
+      // Keep a reasonable sliding window; chart already slices to last 40
+      if (series.length > 120) series.splice(0, series.length - 120)
+      histories.value = { ...histories.value, [key]: series }
+    }
+  })
+}
+
+// Connect on mount and when selected person/device changes
+watch(
+  () => [entityStore.selectedPersonId, activeDevice.value?.deviceId],
+  () => {
+    connectVitalSocket()
+  },
+  { immediate: true }
+)
+
+onUnmounted(() => {
+  closeVitalSocket()
+})
 </script>
-</script>
+
 
 <template>
   <section class="realtime-page" v-if="selectedPerson">
@@ -171,7 +248,7 @@ function onSelectChange(event: Event) {
       <div>
         <p class="eyebrow">实时监测</p>
         <h1>实时数据监控中心</h1>
-        <p class="muted">切换模式查看呼吸心跳波形或人体位姿</p>
+        <p class="muted">呼吸 / 心率波形联动 websocket 秒级刷新。</p>
       </div>
       <div class="controls">
         <label class="select-field">
@@ -183,17 +260,17 @@ function onSelectChange(event: Event) {
           </select>
         </label>
         <div class="tab-bar">
-          <button type="button" :class="{ active: activeTab === 'vitals' }" @click="activeTab = 'vitals'">
+          <RouterLink class="tab" to="/realtime/breath-heart" active-class="active">
             实时体征
-          </button>
-          <button type="button" :class="{ active: activeTab === 'posture' }" @click="activeTab = 'posture'">
+          </RouterLink>
+          <RouterLink class="tab" to="/realtime/posture" active-class="active">
             人体位姿
-          </button>
+          </RouterLink>
         </div>
       </div>
     </header>
 
-    <div v-if="activeTab === 'vitals'" class="tab-panel">
+    <div class="tab-panel">
       <div class="vitals-grid">
         <article class="card chart-card waveform-card">
           <div class="chart-head">
@@ -294,7 +371,7 @@ function onSelectChange(event: Event) {
                 <p>异常告警列表</p>
                 <span>{{ exceptionSummary.total }} 条告警，点击处理</span>
               </div>
-              <button type="button">去处理</button>
+              <RouterLink to="/alerts">去处理</RouterLink>
             </header>
             <div class="table-wrapper">
               <table>
@@ -348,112 +425,6 @@ function onSelectChange(event: Event) {
             {{ trendDeltas.heart >= 0 ? '+' : '' }}{{ trendDeltas.heart }} vs 上一次
           </span>
         </article>
-      </div>
-    </div>
-    <div v-else class="tab-panel posture-panel">
-      <article class="card chart-card" v-if="postureDetection">
-        <div class="chart-head">
-          <div>
-            <p class="eyebrow">人体位姿监测</p>
-            <h2>位姿概览</h2>
-            <p class="muted">最新更新 · {{ formatDate(postureDetection.updatedAt) }}</p>
-          </div>
-          <div class="chart-legend">
-            <span>{{ postureDetection.fallRisk ? '检测到跌倒风险' : '姿态稳定' }}</span>
-          </div>
-        </div>
-        <div class="posture-layout">
-          <div class="posture-visual">
-            <div class="posture-cloud">
-              <p>3D 点云</p>
-              <span>下图展示了点云</span>
-              <em>云图实时更新，可查看坐站行走姿态</em>
-            </div>
-            <div class="posture-state">
-              <p>监测状态</p>
-              <strong>{{ postureDetection.presence ? 'Monitoring status' : '未检测到人体' }}</strong>
-              <span>State：{{ postureDetection.posture || '未知' }}</span>
-            </div>
-          </div>
-          <aside class="posture-side">
-            <article class="card info-card user-card">
-              <header>
-                <span>人员信息</span>
-                <strong>{{ selectedPerson.personName }}</strong>
-              </header>
-              <dl>
-                <div>
-                  <dt>人员 ID</dt>
-                  <dd>{{ selectedPerson.personId }}</dd>
-                </div>
-                <div>
-                  <dt>性别</dt>
-                  <dd>{{ selectedPerson.gender === 'M' ? '男' : '女' }}</dd>
-                </div>
-              </dl>
-            </article>
-            <article class="card info-card device-card" v-if="activeDevice">
-              <header>
-                <span>设备信息</span>
-                <strong>{{ activeDevice.deviceName }}</strong>
-              </header>
-              <dl>
-                <div>
-                  <dt>设备 ID</dt>
-                  <dd>{{ activeDevice.deviceId }}</dd>
-                </div>
-                <div>
-                  <dt>设备类型</dt>
-                  <dd>{{ activeDevice.modelType }}</dd>
-                </div>
-                <div>
-                  <dt>更新时间</dt>
-                  <dd>{{ formatDate(activeDevice.lastHeartbeat) }}</dd>
-                </div>
-              </dl>
-            </article>
-            <article v-else class="card info-card muted-card">
-              <p>暂无设备绑定，请检查硬件状态。</p>
-            </article>
-            <article class="card mini-card posture-cta">
-              <p>姿态跟踪</p>
-              <strong>{{ postureDetection.posture || '未知' }}</strong>
-              <span>{{ postureDetection.fallRisk ? '存在跌倒风险' : '姿态稳定' }}</span>
-            </article>
-          </aside>
-        </div>
-        <div class="status-grid inline">
-          <article class="card mini-card">
-            <p>位姿状态</p>
-            <strong>{{ postureDetection.posture || '未知' }}</strong>
-            <span>实时推理</span>
-          </article>
-          <article class="card mini-card">
-            <p>有人/无人</p>
-            <strong>{{ postureDetection.presence ? '有人' : '无人' }}</strong>
-            <span>{{ postureDetection.presence ? '监测中' : '未占床' }}</span>
-          </article>
-          <article class="card mini-card">
-            <p>心率</p>
-            <strong>{{ postureDetection.heartRate ?? '--' }} 次/分</strong>
-            <span>传感器快照</span>
-          </article>
-          <article class="card mini-card">
-            <p>呼吸</p>
-            <strong>{{ postureDetection.breathRate ?? '--' }} 次/分</strong>
-            <span>传感器快照</span>
-          </article>
-        </div>
-        <div class="posture-meta">
-          <p>设备 · {{ postureDetection?.deviceName }} · {{ postureDetection?.deviceId }}</p>
-          <p>人员 · {{ postureDetection?.personName || selectedPerson.personName }}</p>
-        </div>
-      </article>
-      <article v-else class="card chart-card muted-card">
-        <h2>暂未收到位姿数据</h2>
-        <p>等待设备推送最新的人体位姿检测结果。</p>
-      </article>
-    </div>
   </section>
 </template>
 
@@ -735,78 +706,6 @@ tbody tr + tr {
   border-top: 1px solid rgba(15, 23, 42, 0.04);
 }
 
-.posture-panel .chart-card {
-  gap: 1rem;
-}
-
-.posture-layout {
-  display: grid;
-  grid-template-columns: 1.3fr 1fr;
-  gap: 0.9rem;
-  align-items: stretch;
-}
-
-.posture-visual {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.8rem;
-}
-
-.posture-cloud {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(208, 229, 255, 0.9));
-  border: 1px dashed rgba(99, 102, 241, 0.35);
-  border-radius: 16px;
-  padding: 1rem;
-  text-align: center;
-  color: #4b5563;
-}
-
-.posture-cloud p {
-  margin: 0;
-  font-weight: 700;
-}
-
-.posture-cloud span {
-  color: #94a3b8;
-}
-
-.posture-cloud em {
-  display: block;
-  color: #a855f7;
-  margin-top: 0.4rem;
-}
-
-.posture-state {
-  background: #0f172a;
-  color: white;
-  border-radius: 16px;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.posture-state span {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.posture-side {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.7rem;
-}
-
-.posture-cta {
-  background: linear-gradient(135deg, rgba(110, 231, 243, 0.2), rgba(168, 85, 247, 0.2));
-}
-
-.posture-meta {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  color: #6b7280;
-}
-
 @media (max-width: 1080px) {
   .vitals-grid {
     grid-template-columns: 1fr;
@@ -819,10 +718,6 @@ tbody tr + tr {
 
   .tab-bar {
     align-self: flex-end;
-  }
-
-  .posture-layout {
-    grid-template-columns: 1fr;
   }
 }
 </style>

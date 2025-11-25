@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useEntityStore } from '@/store'
 import { useCareData } from '@/composables/useCareData'
 import type { DeviceStatus } from '@/types'
+import { debugLog } from '@/utils/debugLog'
 
 type StatusFilter = 'ALL' | DeviceStatus
 
@@ -33,6 +34,15 @@ const selectedRows = ref<string[]>([])
 onMounted(async () => {
   await entityStore.refreshAll()
 })
+
+watch(
+  () => mappingSource.value,
+  (next) => {
+    debugLog('MappingsView', '接收到映射数据', next)
+    debugLog('MappingsView', '数据接收状态', Array.isArray(next) && next.length ? '成功' : '空数据')
+  },
+  { immediate: true }
+)
 
 const stateCopy: Record<DeviceStatus, string> = {
   ONLINE: 'Active',
