@@ -96,21 +96,26 @@ const normalizeStatus = (value?: string): DeviceStatusKey => {
 }
 
 const normalizeListResponse = (payload: any) => {
-  if (!payload) return { items: [], total: 0, pageIndex: 0, zeroBased: true }
+  if (!payload) return { items: [], total: 0, pageIndex: 0, zeroBased: true, hasPageIndex: false }
   
   // 记录原始响应以便调试
   debugLog('DevicesView', '原始API响应', payload)
   
   const meta = payload.meta || payload.pagination || {}
-  const pageIndex =
-    typeof meta.currentPage === 'number'
+  const hasPageIndex =
+    typeof meta.currentPage === 'number' ||
+    typeof meta.page === 'number' ||
+    typeof payload.page === 'number'
+
+  const pageIndex = hasPageIndex
+    ? typeof meta.currentPage === 'number'
       ? meta.currentPage
       : typeof meta.page === 'number'
         ? meta.page
-        : typeof payload.page === 'number'
-          ? payload.page
-          : 0
-  const zeroBased = !!(meta.currentPage === undefined && (meta.page !== undefined || payload.page !== undefined))
+        : payload.page
+    : 0
+
+  const zeroBased = hasPageIndex && !!(meta.currentPage === undefined && (meta.page !== undefined || payload.page !== undefined))
   
   // 处理各种可能的响应格式
   let items = []
@@ -118,16 +123,19 @@ const normalizeListResponse = (payload: any) => {
   
   if (Array.isArray(payload.records)) {
     items = payload.records
-    total = meta.totalItems ?? meta.total ?? payload.total ?? payload.records.length
+    total =
+      meta.totalItems ?? meta.total ?? meta.totalRecords ?? meta.totalElements ?? payload.total ?? payload.records.length
   } else if (Array.isArray(payload.data)) {
     items = payload.data
-    total = meta.totalItems ?? meta.total ?? payload.total ?? payload.data.length
+    total =
+      meta.totalItems ?? meta.total ?? meta.totalRecords ?? meta.totalElements ?? payload.total ?? payload.data.length
   } else if (Array.isArray(payload.items)) {
     items = payload.items
-    total = meta.totalItems ?? meta.total ?? payload.total ?? payload.items.length
+    total =
+      meta.totalItems ?? meta.total ?? meta.totalRecords ?? meta.totalElements ?? payload.total ?? payload.items.length
   } else if (Array.isArray(payload.list)) {
     items = payload.list
-    total = meta.totalItems ?? meta.total ?? payload.total ?? payload.list.length
+    total = meta.totalItems ?? meta.total ?? meta.totalRecords ?? meta.totalElements ?? payload.total ?? payload.list.length
   } else if (Array.isArray(payload)) {
     items = payload
     total = payload.length
@@ -145,7 +153,7 @@ const normalizeListResponse = (payload: any) => {
     }
   }
   
-  const result = { items, total, pageIndex, zeroBased }
+  const result = { items, total, pageIndex, zeroBased, hasPageIndex }
   debugLog('DevicesView', '解析后的响应数据', result)
   return result
 }
@@ -184,13 +192,13 @@ const loadDevices = async () => {
       sortDir: 'desc'
     }
     const response = await deviceApi.list(params)
-    const { items, total, pageIndex, zeroBased } = normalizeListResponse(response)
+    const { items, total, pageIndex, zeroBased, hasPageIndex } = normalizeListResponse(response)
     rows.value = (items || []).map((item: CaregiverDevice) => ({
       ...item,
       status: normalizeStatus(item.status)
     }))
     pagination.total = typeof total === 'number' ? total : rows.value.length
-    if (typeof pageIndex === 'number') {
+    if (hasPageIndex && typeof pageIndex === 'number') {
       pagination.page = zeroBased ? pageIndex + 1 : pageIndex || 1
     }
     if (pagination.page < 1) pagination.page = 1

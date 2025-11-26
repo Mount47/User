@@ -4,6 +4,7 @@ import { useEntityStore } from '@/store'
 import { useCareData } from '@/composables/useCareData'
 import type { DeviceStatus } from '@/types'
 import { debugLog } from '@/utils/debugLog'
+import { mappingApi } from '@/api'
 
 type StatusFilter = 'ALL' | DeviceStatus
 
@@ -37,6 +38,15 @@ const statusFilter = ref<StatusFilter>('ALL')
 const page = ref(1)
 const pageSize = 5
 const selectedRows = ref<string[]>([])
+const formVisible = ref(false)
+const formMode = ref<'create' | 'edit'>('create')
+const formError = ref('')
+const editingId = ref<string | number | null>(null)
+const formData = ref({
+  personId: '',
+  deviceId: '',
+  mappingName: ''
+})
 
 // 下拉框状态
 const statusDropdownOpen = ref(false)
@@ -222,11 +232,92 @@ function goNext() {
 }
 
 function handleAddMapping() {
-  console.info('Add mapping for selection', selectedRows.value)
+  const firstRow = pagedRows.value.find((row) => selectedRows.value.includes(row.id))
+  formMode.value = 'create'
+  editingId.value = null
+  formData.value = {
+    personId: firstRow?.userId || '',
+    deviceId: firstRow?.deviceId || '',
+    mappingName: firstRow?.mappingName || ''
+  }
+  formError.value = ''
+  formVisible.value = true
 }
 
 function handleRemoveMapping() {
-  console.info('Remove mapping for selection', selectedRows.value)
+  const removable = entityStore.mappings.filter((mapping) => selectedRows.value.includes(String(mapping.id)))
+
+  if (!removable.length) {
+    window.alert('请选择已绑定的记录再执行删除操作')
+    return
+  }
+
+  if (!window.confirm(`确定删除选中的 ${removable.length} 条绑定关系吗？`)) return
+
+  Promise.all(removable.map((item) => mappingApi.deleteById(item.id)))
+    .then(async () => {
+      removable.forEach((item) => entityStore.removeMapping(item.id))
+      await entityStore.fetchMappings(true)
+      selectedRows.value = []
+      window.alert('删除成功')
+    })
+    .catch((error) => {
+      console.error('删除映射失败', error)
+      window.alert(error?.message || '删除失败')
+    })
+}
+
+const currentRowById = (id: string) => pagedRows.value.find((row) => row.id === id)
+
+function handleEditMapping(rowId: string) {
+  const mapping = entityStore.mappings.find((item) => String(item.id) === rowId)
+  const row = currentRowById(rowId)
+  if (!mapping && !row) {
+    window.alert('无法定位需要编辑的记录')
+    return
+  }
+
+  formMode.value = mapping ? 'edit' : 'create'
+  editingId.value = mapping?.id ?? null
+  formData.value = {
+    personId: String(mapping?.personId || row?.userId || ''),
+    deviceId: String(mapping?.deviceId || row?.deviceId || ''),
+    mappingName: mapping?.mappingName || row?.mappingName || ''
+  }
+  formError.value = ''
+  formVisible.value = true
+}
+
+async function submitForm() {
+  const payload = {
+    personId: formData.value.personId.trim(),
+    deviceId: formData.value.deviceId.trim(),
+    mappingName: formData.value.mappingName.trim() || undefined,
+    is_active: true
+  }
+
+  if (!payload.personId || !payload.deviceId) {
+    formError.value = '人员ID和设备ID均不能为空'
+    return
+  }
+
+  try {
+    if (formMode.value === 'edit' && editingId.value) {
+      await mappingApi.update(editingId.value, payload)
+      window.alert('映射已更新')
+    } else {
+      await mappingApi.create(payload)
+      window.alert('映射已创建')
+    }
+
+    await entityStore.fetchMappings(true)
+    selectedRows.value = []
+    formVisible.value = false
+    formError.value = ''
+  } catch (error: any) {
+    console.error('保存映射失败', error)
+    formError.value = error?.message || '操作失败'
+  }
 }
 </script>
 
@@ -364,11 +455,7 @@ function handleRemoveMapping() {
               </td>
               <td>{{ row.lastUpdated }}</td>
               <td class="actions">
-                <button type="button" aria-label="More actions">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </button>
+                <button type="button" class="ghost" @click="handleEditMapping(row.id)">编辑</button>
               </td>
             </tr>
             <tr v-if="!pagedRows.length">
@@ -395,6 +482,33 @@ function handleRemoveMapping() {
         </div>
       </footer>
     </article>
+
+    <div v-if="formVisible" class="modal" @click.self="formVisible = false">
+      <div class="modal-card">
+        <header>
+          <h3>{{ formMode === 'create' ? '新增绑定关系' : '编辑绑定关系' }}</h3>
+        </header>
+        <div class="form-grid">
+          <label>
+            <span>人员 ID</span>
+            <input v-model="formData.personId" placeholder="如：P1001" />
+          </label>
+          <label>
+            <span>设备 ID</span>
+            <input v-model="formData.deviceId" placeholder="如：R60-A1" />
+          </label>
+          <label class="full">
+            <span>映射名称</span>
+            <input v-model="formData.mappingName" placeholder="选填，可用于备注" />
+          </label>
+        </div>
+        <p v-if="formError" class="form-error">{{ formError }}</p>
+        <footer class="modal-actions">
+          <button type="button" class="ghost" @click="formVisible = false">取消</button>
+          <button type="button" class="primary" @click="submitForm">保存</button>
+        </footer>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -840,5 +954,83 @@ tbody tr.selected::before {
   right: 1rem;
   color: #3b82f6;
   font-weight: bold;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 1rem;
+}
+
+.modal-card {
+  width: min(520px, 100%);
+  background: #fff;
+  border-radius: 20px;
+  padding: 1.5rem;
+  box-shadow: 0 25px 45px rgba(15, 23, 42, 0.15);
+}
+
+.modal-card h3 {
+  margin: 0 0 1rem 0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: rgba(15, 23, 42, 0.75);
+}
+
+.form-grid input {
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  background: #f9fafb;
+}
+
+.form-grid .full {
+  grid-column: 1 / -1;
+}
+
+.form-error {
+  color: #ef4444;
+  margin-top: 0.5rem;
+}
+
+.modal-actions {
+  margin-top: 1.2rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.modal-actions .primary {
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  padding: 0.65rem 1.4rem;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.modal-actions .ghost {
+  background: rgba(124, 58, 237, 0.08);
+  color: #7c3aed;
+  border: none;
+  padding: 0.65rem 1.2rem;
+  border-radius: 12px;
+  cursor: pointer;
 }
 </style>
